@@ -6,9 +6,10 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urljoin
-
+import urllib.request
+from PIL import Image,ImageDraw, ImageFont
+from io import StringIO
 import aiohttp
-
 from .templating import render_template
 from .yobot_exceptions import ServerError
 
@@ -37,7 +38,7 @@ class Consult:
 
     def __init__(self, glo_setting: dict, *args, **kwargs):
         self.setting = glo_setting
-        self.nickname_dict: Dict[str, Tuple[str, str]] = {}
+        self.nickname_dict: Dict[str, Tuple[str, str, str]] = {}
         nickfile = os.path.join(glo_setting["dirname"], "nickname3.csv")
         if not os.path.exists(nickfile):
             asyncio.ensure_future(self.update_nicknames(),
@@ -48,7 +49,7 @@ class Consult:
                 for line in csv.split("\n")[1:]:
                     row = line.split(",")
                     for col in row:
-                        self.nickname_dict[col] = (row[0], row[1])
+                        self.nickname_dict[col] = (row[0],row[2])
         self.output_foler = os.path.join(self.setting['dirname'], 'output')
         self.output_num = len(os.listdir(self.output_foler))
 
@@ -69,7 +70,7 @@ class Consult:
             for line in csv.split("\n")[1:]:
                 row = line.split(",")
                 for col in row:
-                    self.nickname_dict[col] = (row[0], row[1])
+                    self.nickname_dict[col] = (row[0], row[2])
 
     def user_input(self, cmd: str, is_retry=False):
         def_set = set()
@@ -95,7 +96,7 @@ class Consult:
             raise ValueError("需要完整的5人防守队伍")
         return def_lst
 
-    async def jjcsearch_async(self, def_lst, region):
+    async def jjcsearch_async(self, def_lst, region,msg):
         search_source = self.setting["jjc_search"]
         try:
             if search_source == "nomae.net":
@@ -109,28 +110,78 @@ class Consult:
 
         if len(result) == 0:
             return '没有找到公开的解法'
+        msgEnd = msg["raw_message"];
+        reply = 'bot为您';
+        reply += '找到{}条解法:'.format(len(result));
+        if msgEnd.startswith("jjc带图"):
+            reply = self.jjcimgconcat(result,reply);
+        elif msgEnd.startswith("jjc文字"):
+            reply = self.jjcNameconcat(result,reply);
+        else:
+            page = await render_template(
+                'jjc-solution.html',
+                def_lst=def_lst,
+                region=region,
+                result=result,
+                public_base=self.setting["public_basepath"],
+                search_source=search_source,
+            )
+            self.output_num += 1
+            filename = 'solution-{}-{}.html'.format(self.output_num, random.randint(0, 999))
+            with open(os.path.join(self.output_foler, filename), 'w', encoding='utf-8') as f:
+                f.write(page)
+            addr = urljoin(
+                self.setting['public_address'],
+                '{}output/{}'.format(
+                    self.setting['public_basepath'], filename));
+            reply += addr;
+            if self.setting['web_mode_hint']:
+                reply += '\n\n如果无法打开，请仔细阅读教程中《链接无法打开》的说明'
+        return reply;
 
-        page = await render_template(
-            'jjc-solution.html',
-            def_lst=def_lst,
-            region=region,
-            result=result,
-            public_base=self.setting["public_basepath"],
-            search_source=search_source,
-        )
+    def jjcNameconcat(self,result,reply):
+        for team in result:
+            reply += ' \n '
+            for img in team.team:
+                reply += '{},'.format(str(self.nickname_dict.get(str(img.char_id).lower(), None)[1]));
+            reply += "点赞数:{}，反对数:{}".format(str(team.good),str(team.bad));
+        return reply;
 
-        self.output_num += 1
-        filename = 'solution-{}-{}.html'.format(self.output_num, random.randint(0, 999))
-        with open(os.path.join(self.output_foler, filename), 'w', encoding='utf-8') as f:
-            f.write(page)
-        addr = urljoin(
-            self.setting['public_address'],
-            '{}output/{}'.format(
-                self.setting['public_basepath'], filename))
-        reply = '找到{}条解法：{}'.format(len(result), addr)
-        if self.setting['web_mode_hint']:
-            reply += '\n\n如果无法打开，请仔细阅读教程中《链接无法打开》的说明'
-        return reply
+    def jjcimgconcat(self,result,reply):
+        num = len(result);
+        setFont = ImageFont.truetype(os.path.join(self.output_foler, 'resource/simsun.ttf'), 40);
+        fillColor = "#000000";
+        main_img = Image.open(os.path.join(self.output_foler, 'resource/icon/unit/base.jpg'))
+        main_img = main_img.resize((540,80*num+80));
+        draw = ImageDraw.Draw(main_img);
+        draw.text((10, 10), "解法：",font=setFont,fill=fillColor,direction=None);
+        main_img.show();
+        setFont = ImageFont.truetype(os.path.join(self.output_foler, 'resource/simsun.ttf'), 20)
+        idx = 0;
+        for team in result:
+            i = 0;
+            try:
+                base_img = Image.open(os.path.join(self.output_foler, 'resource/icon/unit/base.jpg'))
+                base_img = base_img.resize((540,80));
+                for img in team.team:
+                    img = Image.open(os.path.join(self.output_foler, 'resource/icon/unit/{}31.jpg'.format(img.char_id)))
+                    img = img.resize((80,80))
+                    base_img.paste(img, [i*80,0]);
+                    i=i+1
+                dzs = "点赞数:{}".format(str(team.good));
+                fds = "反对数:{}".format(str(team.bad));
+                draw = ImageDraw.Draw(base_img);
+                draw.text((410, 10),dzs ,font=setFont,fill=fillColor,direction=None);
+                draw.text((410, 50),fds ,font=setFont,fill=fillColor,direction=None);
+                base_img.show();
+            except IOError:
+                print("Error: 没有找到文件或读取文件失败");
+            main_img.paste(base_img, [0,80+80*idx]);
+            mainName = 'solution-{}-{}.jpg'.format(self.output_num, random.randint(0, 999))
+            main_img.save(os.path.join(self.output_foler, mainName));
+            idx = idx +1;
+        reply += "[CQ:image,file={}]\n".format(os.path.join(self.output_foler, mainName));
+        return reply;
 
     def _parse_nomae_team(self, team) -> Solution:
         if team['equip'] is None:
@@ -174,9 +225,9 @@ class Consult:
             retry -= 1
             try:
                 async with aiohttp.request(
-                    'POST',
-                    'https://nomae.net/princess_connect/public/_arenadb/receive.php',
-                    headers=headers,
+                        'POST',
+                        'https://nomae.net/princess_connect/public/_arenadb/receive.php',
+                        headers=headers,
                         data=req) as resp:
                     restxt = await resp.text()
             except aiohttp.ClientError as e:
@@ -215,10 +266,10 @@ class Consult:
                    "page": 1, "sort": 1, "ts": int(time.time()), "region": region}
         try:
             async with aiohttp.request(
-                'POST',
-                'https://api.pcrdfans.com/x/v1/search',
-                headers=headers,
-                json=payload,
+                    'POST',
+                    'https://api.pcrdfans.com/x/v1/search',
+                    headers=headers,
+                    json=payload,
             ) as resp:
                 restxt = await resp.text()
         except aiohttp.ClientError as e:
@@ -242,6 +293,10 @@ class Consult:
             return 1
         elif cmd.startswith("jjc国服"):
             return 2
+        elif cmd.startswith("jjc文字"):
+            return 2
+        elif cmd.startswith("jjc带图"):
+            return 2
         elif cmd.startswith("jjc台服"):
             return 3
         elif cmd.startswith("jjc日服"):
@@ -262,7 +317,7 @@ class Consult:
                 anlz = self.user_input(msg["raw_message"][5:])
             except ValueError as e:
                 return str(e)
-            reply = await self.jjcsearch_async(anlz, match_num)
+            reply = await self.jjcsearch_async(anlz, match_num,msg)
         return {
             "reply": reply,
             "block": True

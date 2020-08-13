@@ -16,6 +16,7 @@ var vm = new Vue({
         send_via_private: false,
         dropMemberVisible: false,
         today: 0,
+        isMobile: false
     },
     mounted() {
         var thisvue = this;
@@ -50,7 +51,25 @@ var vm = new Vue({
             thisvue.$alert(error, '获取数据失败');
         });
     },
+    beforeMount () {
+        var userAgentInfo = navigator.userAgent;
+        var Agents = ['Android', 'iPhone', 'SymbianOS', 'Windows Phone', 'iPad', 'iPod'];
+        for (var v = 0; v < Agents.length; v++) {
+            if (userAgentInfo.indexOf(Agents[v]) > 0) {
+                this.isMobile = true
+                break
+            }
+        }
+    },
     methods: {
+        clickCell: function (row, column) {
+            if (column.label === '昵称') {
+                this.$refs.multipleTable.toggleRowExpansion(row)
+            }
+        },
+        getRowClass: function (e) {
+            return e.row.finished === 3 ? 'finishedRow' : ''
+        },
         get_today: function () {
             let d = new Date();
             d -= 18000000;
