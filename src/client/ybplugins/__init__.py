@@ -16,4 +16,5 @@ __all__ = [
     'push_news',
     'calender',
     'custom',
+    'create_resignation_report',
 ]
