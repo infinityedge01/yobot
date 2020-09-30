@@ -18,9 +18,9 @@ class Create_resignation_report:
         self.api = bot_api
         self.constellation_set = {'1':'射手','2':'摩羯','3':'水瓶','4':'双鱼','5':'白羊','6':'金牛','7':'双子','8':'巨蟹','9':'狮子','10':'处女','11':'天秤','12':'天蝎'}
         self.time = time.localtime(time.time())
-        self.month = str(self.time.tm_mon)
+        self.month = '9'#str(self.time.tm_mon)
         self.year = str(self.time.tm_year)
-        self.constellation = self.constellation_set[self.month]
+        self.constellation = '处女'#self.constellation_set[self.month]
         self.port = self.setting['port']
         
     async def execute_async(self,ctx):
@@ -53,6 +53,7 @@ class Create_resignation_report:
                 is_continue += 1
         total_chl = len(challenges) - is_continue
         damage_to_boss: list = [0 for i in range(5)]
+        challenge_to_boss: list = [0 for i in range(5)]
         total_damage = 0
         for chl in challenges[::-1]:
             damage_to_boss[chl['boss_num']-1] += chl['damage']
@@ -60,6 +61,10 @@ class Create_resignation_report:
         avg_day_damage = int(total_damage/6)
         for chl in challenges[::-1]:
             if chl['damage'] != 0:
+                if chl['health_ramain'] == 0 or chl['is_continue'] == True:
+                    challenge_to_boss[chl['boss_num']-1] += 0.5
+                else:
+                    challenge_to_boss[chl['boss_num']-1] += 1
                 challenges.remove(chl)
         Miss_chl = len(challenges)     
         if total_chl >= 18:
@@ -72,8 +77,8 @@ class Create_resignation_report:
         #设置中文字体
         plt.rcParams['font.family'] = ['Microsoft YaHei']
         plt.figure(figsize=(3.5, 3.5))
-        labels = [f'{x+1}王' for x in range(0,5) if damage_to_boss[x] != 0]
-        sizes = [x for x in damage_to_boss if x != 0]
+        labels = [f'{x+1}王' for x in range(0,5) if challenge_to_boss[x] != 0]
+        sizes = [x for x in challenge_to_boss if x != 0]
         patches, l_text, p_text = plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90,labeldistance=1.1)
         for t in l_text:
             #为标签设置字体大小
